@@ -1,0 +1,12 @@
+name: laar_trainee
+title: laar_trainee
+username:
+account: olivermueller
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 1626305
+bundleId: 2704260
+url: https://olivermueller.shinyapps.io/laar_trainee/
+when: 1578051808.7277
+asMultiple: FALSE
+asStatic: FALSE

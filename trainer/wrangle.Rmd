@@ -1,0 +1,580 @@
+---
+title: "LAAR Dashboard - v01"
+output: html_notebook
+---
+
+## Setup
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+rm(list=ls())
+set.seed(42)
+
+```
+
+
+## Import packages
+```{r load packages, warning=FALSE, message=FALSE}
+library(tidyverse)
+theme_set(theme_classic())
+library(jsonlite)
+library(lubridate)
+
+```
+
+
+## Load data
+```{r}
+statements_raw <- stream_in(file("trussApp.json"))
+
+```
+
+
+## Explore and prepare data
+
+Show variable names
+```{r}
+names(statements_raw)
+```
+
+Filter data to week of PLS and relevant variables
+```{r}
+statements_pls <- statements_raw %>% 
+  filter(timestamp >= "2019-04-01") %>% 
+  filter(timestamp <= "2019-04-05") %>% 
+  select('_id', timestamp, statement)
+
+```
+
+Flatten nested JSON structure to data frame, select relevant variables, make object IDs prettier
+```{r}
+statements_pls_flat <- statements_pls %>%
+  flatten() %>% 
+  select(timestamp, 
+         statement.actor.account.name,
+         statement.actor.name,
+         'statement.verb.display.en-US',
+         statement.object.id
+         ) %>% 
+  mutate(
+    statement.object.id = str_replace(statement.object.id, 'http://example.com/', ''),
+    statement.object.id = str_replace(statement.object.id, 'http://activitystrea.ms/schema/1.0/', ''),
+    event = str_c(statement.actor.name, " ", `statement.verb.display.en-US`, " ", statement.object.id)
+  )
+
+
+```
+
+Split data into trainer and trainee datasets
+```{r}
+statements_pls_flat_trainee <- statements_pls_flat %>% 
+  filter(statement.actor.name == "Trainee")
+
+statements_pls_flat_trainer <- statements_pls_flat %>% 
+  filter(statement.actor.name == "Trainer")
+
+```
+
+### Trainee data
+
+Filter out irrelevant records
+```{r}
+statements_pls_flat_trainee <- statements_pls_flat_trainee %>% 
+  filter(statement.object.id != "application")
+
+```
+
+Transform data from long to wide
+```{r, warning=FALSE}
+
+statements_pls_flat_trainee_wide <- statements_pls_flat_trainee %>% 
+  pivot_wider(names_from = event, values_from = timestamp, values_fn = list(timestamp = min)) %>%
+  select(-'statement.verb.display.en-US', -statement.object.id, -statement.actor.name) %>% 
+  group_by(statement.actor.account.name) %>% 
+  summarise_all(max, na.rm=TRUE)
+
+statements_pls_flat_trainee_wide <- statements_pls_flat_trainee_wide %>% 
+  mutate(
+    session = statement.actor.account.name,
+    aborted_node_1 = ifelse(year(`Trainee skipped node/1`) != 2019 & year(`Trainee passed node/1`) != 2019, 1, 0),
+    aborted_node_2 = ifelse(year(`Trainee skipped node/2`) != 2019 & year(`Trainee passed node/2`) != 2019, 1, 0),
+    aborted_node_3 = ifelse(year(`Trainee skipped node/3`) != 2019 & year(`Trainee passed node/3`) != 2019, 1, 0),
+    aborted_node_4 = ifelse(year(`Trainee skipped node/4`) != 2019 & year(`Trainee passed node/4`) != 2019, 1, 0),
+    aborted_node_5 = ifelse(year(`Trainee skipped node/5`) != 2019 & year(`Trainee passed node/5`) != 2019, 1, 0),
+    aborted_node_6 = ifelse(year(`Trainee skipped node/6`) != 2019 & year(`Trainee passed node/6`) != 2019, 1, 0),
+    skipped_node_1 = year(`Trainee skipped node/1`) == 2019,
+    skipped_node_1 = ifelse(is.na(skipped_node_1), 0, 1),
+    skipped_node_2 = year(`Trainee skipped node/2`) == 2019,
+    skipped_node_2 = ifelse(is.na(skipped_node_2), 0, 1),
+    skipped_node_3 = year(`Trainee skipped node/3`) == 2019,
+    skipped_node_3 = ifelse(is.na(skipped_node_3), 0, 1),
+    skipped_node_4 = year(`Trainee skipped node/4`) == 2019,
+    skipped_node_4 = ifelse(is.na(skipped_node_4), 0, 1),
+    skipped_node_5 = year(`Trainee skipped node/5`) == 2019,
+    skipped_node_5 = ifelse(is.na(skipped_node_5), 0, 1),
+    skipped_node_6 = year(`Trainee skipped node/6`) == 2019,
+    skipped_node_6 = ifelse(is.na(skipped_node_6), 0, 1),
+    nodes_skipped =  skipped_node_1 + skipped_node_2 + skipped_node_3 + skipped_node_4 + skipped_node_5 + skipped_node_6
+  ) %>% 
+  filter(
+    !is.na(aborted_node_1)
+  ) %>% 
+  filter(
+    !is.na(aborted_node_2)
+  ) %>% 
+  filter(
+    !is.na(aborted_node_3)
+  ) %>% 
+  filter(
+    !is.na(aborted_node_4)
+  ) %>% 
+  filter(
+    !is.na(aborted_node_5)
+  ) %>% 
+  filter(
+    !is.na(aborted_node_6)
+  ) %>% 
+  select(
+    session,
+    skipped_node_1, skipped_node_2, skipped_node_3, skipped_node_4, skipped_node_5, skipped_node_6,
+    nodes_skipped,
+    'Trainee launched node/1',      
+    #'Trainee viewed node/1',    
+    'Trainee attempted node/1',    
+    'Trainee skipped node/1',       
+    'Trainee passed node/1',      
+    #'Trainee failed node/1',
+    #'Trainee finished node/1',
+    'Trainee launched node/2',     
+    #'Trainee viewed node/2',        
+    'Trainee attempted node/2',     
+    'Trainee skipped node/2',      
+    'Trainee passed node/2',     
+    #'Trainee failed node/2',
+    #'Trainee finished node/2',
+    'Trainee launched node/3',     
+    #'Trainee viewed node/3',       
+    'Trainee attempted node/3',    
+    'Trainee skipped node/3',     
+    'Trainee passed node/3',       
+    #'Trainee failed node/3',
+    #'Trainee finished node/3',
+    'Trainee launched node/4',    
+    #'Trainee viewed node/4',       
+    'Trainee attempted node/4',    
+    'Trainee skipped node/4',      
+    'Trainee passed node/4',       
+    #'Trainee failed node/4',
+    #'Trainee finished node/4',
+    'Trainee launched node/5',     
+    #'Trainee viewed node/5',      
+    'Trainee attempted node/5',    
+    'Trainee skipped node/5',       
+    'Trainee passed node/5',      
+    #'Trainee failed node/5',
+    #'Trainee finished node/5',
+    'Trainee launched node/6',     
+    #'Trainee viewed node/6',       
+    'Trainee attempted node/6',    
+    'Trainee skipped node/6',     
+    'Trainee passed node/6',
+    #'Trainee failed node/6'
+    #'Trainee finished node/6'
+  )
+
+```
+
+Calculate activity times
+```{r}
+time_for_node <- function(df, node){
+  result <- case_when(
+    node == 1 ~ df$'Trainee launched node/2' - df$'Trainee launched node/1',
+    node == 2 ~ df$'Trainee launched node/3' - df$'Trainee launched node/2',
+    node == 3 ~ df$'Trainee launched node/4' - df$'Trainee launched node/3',
+    node == 4 ~ df$'Trainee launched node/5' - df$'Trainee launched node/4',
+    node == 5 ~ df$'Trainee launched node/6' - df$'Trainee launched node/5',
+    node == 6 ~ df$'Trainee passed node/6' - df$'Trainee launched node/6',
+    TRUE ~ df$'Trainee passed node/1' - df$'Trainee launched node/1'
+    )
+  return(result)
+  }
+
+statements_pls_flat_trainee_wide$time_for_node_1 <- time_for_node(statements_pls_flat_trainee_wide, 1)
+statements_pls_flat_trainee_wide$time_for_node_2 <- time_for_node(statements_pls_flat_trainee_wide, 2)
+statements_pls_flat_trainee_wide$time_for_node_3 <- time_for_node(statements_pls_flat_trainee_wide, 3)
+statements_pls_flat_trainee_wide$time_for_node_4 <- time_for_node(statements_pls_flat_trainee_wide, 4)
+statements_pls_flat_trainee_wide$time_for_node_5 <- time_for_node(statements_pls_flat_trainee_wide, 5)
+statements_pls_flat_trainee_wide$time_for_node_6 <- time_for_node(statements_pls_flat_trainee_wide, 6)
+```
+
+Add column indicating whether learning sequence has been completed from start to end
+```{r}
+statements_pls_flat_trainee_wide$sequence_completed <- ifelse(statements_pls_flat_trainee_wide$time_for_node_6 > 0, TRUE, FALSE) 
+statements_pls_flat_trainee_wide$sequence_completed <- replace_na(statements_pls_flat_trainee_wide$sequence_completed, FALSE)
+```
+
+Add columns indicating whether single activities have been skipped by learner
+```{r}
+statements_pls_flat_trainee_wide <- statements_pls_flat_trainee_wide %>% 
+  mutate(
+    skipped_corner_1 = skipped_node_1 + skipped_node_2 + skipped_node_3,  
+    skipped_corner_1 = ifelse(skipped_corner_1 == 0, 0, 1),
+    skipped_corner_2 = skipped_node_4,
+    skipped_corner_3 = skipped_node_5,
+    skipped_corner_4 = skipped_node_6,
+    time_for_corner_1 = time_for_node_1 + time_for_node_2 + time_for_node_3,
+    time_for_corner_2 = time_for_node_4,
+    time_for_corner_3 = time_for_node_5,
+    time_for_corner_4 = time_for_node_6
+  )
+
+```
+
+### Trainer data
+
+Filter out irrelavant records and transform some columns
+```{r}
+statements_pls_flat_trainer <- statements_pls_flat_trainer %>% 
+  filter(statement.object.id != "application") %>% 
+  filter(`statement.verb.display.en-US` != "evaluated") %>%
+  mutate(
+    session = statement.actor.account.name,
+    success = ifelse(`statement.verb.display.en-US` == "accepted", 1, 0),
+    node = str_sub(statement.object.id, 1, 6) 
+  )
+
+```
+
+Group and summarise data by user and node
+```{r}
+statements_pls_flat_trainer_g1 <- statements_pls_flat_trainer %>% 
+  group_by(session, node) %>% 
+  summarise(
+    score = round(mean(success) * 2, digits = 2),
+    score = ifelse(score > 1, 1, score)
+  )
+
+statements_pls_flat_trainer_g2 <- statements_pls_flat_trainer %>% 
+  filter(node == "node/4") %>% 
+  group_by(session, statement.object.id) %>% 
+  summarise(
+    score = round(mean(success) * 2, digits = 2),
+    score = ifelse(score > 1, 1, score)
+  )
+
+
+```
+
+From long to wide
+```{r}
+statements_pls_flat_trainer_g1_wide <- statements_pls_flat_trainer_g1 %>% 
+  pivot_wider(names_from = node, values_from = score) %>% 
+  mutate(
+    score_node_1 = replace_na(`node/1`, 0),
+    score_node_2 = replace_na(`node/2`, 0),
+    score_node_3 = replace_na(`node/3`, 0),
+    score_node_4 = replace_na(`node/4`, 0),
+    score_node_5 = replace_na(`node/5`, 0),
+    score_node_6 = replace_na(`node/6`, 0),
+    score_corner_1 = mean(score_node_1, score_node_2, score_node_3),
+    score_corner_2 = score_node_4,
+    score_corner_3 = score_node_5,
+    score_corner_4 = score_node_6,
+    overall_score = mean(score_corner_1, score_corner_2, score_corner_3, score_corner_4)
+  ) %>% 
+  select(
+    session,
+    score_corner_1, score_corner_2, score_corner_3, score_corner_4,
+    overall_score
+  )
+
+statements_pls_flat_trainer_g2_wide <- statements_pls_flat_trainer_g2 %>% 
+  pivot_wider(names_from = statement.object.id, values_from = score) %>% 
+  mutate_all(round) %>% 
+  ungroup() %>% 
+  transmute(
+    session = session,
+    score_activity_01 = `node/4/checklistitem/0`,
+    score_activity_02 = `node/4/checklistitem/1`,
+    score_activity_03 = `node/4/checklistitem/2`,
+    score_activity_04 = `node/4/checklistitem/3`,
+    score_activity_05 = `node/4/checklistitem/4`,
+    score_activity_06 = `node/4/checklistitem/5`,
+    score_activity_07 = `node/4/checklistitem/6`,
+    score_activity_08 = `node/4/checklistitem/7`,
+    score_activity_09 = `node/4/checklistitem/8`,
+    score_activity_10 = `node/4/checklistitem/9`,
+    score_activity_11 = `node/4/checklistitem/10`,
+    score_activity_12 = `node/4/checklistitem/11`,
+    score_activity_13 = `node/4/checklistitem/12`,
+    score_activity_14 = `node/4/checklistitem/13`
+  )
+
+```
+
+
+## Join Trainee and Trainer data
+```{r}
+joined <- statements_pls_flat_trainee_wide %>% 
+  inner_join(statements_pls_flat_trainer_g1_wide, by = "session") %>% 
+  inner_join(statements_pls_flat_trainer_g2_wide, by = "session")
+
+```
+
+
+## Visualization: Trainer Dashboard
+
+### Time
+
+```{r}
+joined <- joined %>% 
+  mutate(
+    time_for_corner_4 = ifelse(is.infinite(time_for_corner_4), NA, time_for_corner_4),
+    score_competence_10_02 = (score_activity_03 + score_activity_04 + score_activity_07 + score_activity_10 + score_activity_13)/5,
+    score_competence_10_03 = (score_activity_01 + score_activity_02 + score_activity_06 + score_activity_12)/4,
+    score_competence_10_04 = score_activity_11,
+    score_competence_10_05 = (score_activity_05 + score_activity_09)/2,
+    score_competence_10_08 = score_activity_14,
+    score_competence_10_10 = score_activity_08
+  )
+
+joined_s <- joined %>% 
+  summarise(
+    time_for_corner_1_avg = mean(time_for_corner_1),
+    time_for_corner_2_avg = mean(time_for_corner_2),
+    time_for_corner_3_avg = mean(time_for_corner_3),
+    time_for_corner_4_avg = mean(time_for_corner_4, na.rm = TRUE),
+    time_for_corner_1_sd = sd(time_for_corner_1),
+    time_for_corner_2_sd = sd(time_for_corner_2),
+    time_for_corner_3_sd = sd(time_for_corner_3),
+    time_for_corner_4_sd = sd(time_for_corner_4, na.rm = TRUE),
+    overall_score_avg = mean(overall_score),
+    score_corner_1_avg = mean(score_corner_1),
+    score_corner_2_avg = mean(score_corner_2),
+    score_corner_3_avg = mean(score_corner_3),
+    score_corner_4_avg = mean(score_corner_4),
+    score_activity_01_avg = mean(score_activity_01),
+    score_activity_02_avg = mean(score_activity_02),
+    score_activity_03_avg = mean(score_activity_03),
+    score_activity_04_avg = mean(score_activity_04),
+    score_activity_05_avg = mean(score_activity_05),
+    score_activity_06_avg = mean(score_activity_06),
+    score_activity_07_avg = mean(score_activity_07),
+    score_activity_08_avg = mean(score_activity_08),
+    score_activity_09_avg = mean(score_activity_09),
+    score_activity_10_avg = mean(score_activity_10),
+    score_activity_11_avg = mean(score_activity_11),
+    score_activity_12_avg = mean(score_activity_12),
+    score_activity_13_avg = mean(score_activity_13),
+    score_activity_14_avg = mean(score_activity_14),
+    score_competence_10_02_avg = mean(score_competence_10_02),
+    score_competence_10_03_avg = mean(score_competence_10_03),
+    score_competence_10_04_avg = mean(score_competence_10_04),
+    score_competence_10_05_avg = mean(score_competence_10_05),
+    score_competence_10_08_avg = mean(score_competence_10_08),
+    score_competence_10_10_avg = mean(score_competence_10_10)
+  )
+
+write_csv(joined, "joined.csv")
+#joined <- read_csv("joined.csv")
+
+write_csv(joined_s, "joined_s.csv")
+#joined_s <- read_csv("joined_s.csv")
+
+```
+
+
+```{r}
+ggplot(data=joined_s) +
+  geom_col(mapping = aes(x="#1", y=time_for_corner_1_avg)) +
+  geom_col(mapping = aes(x="#2", y=time_for_corner_2_avg)) +
+  geom_col(mapping = aes(x="#3", y=time_for_corner_3_avg)) +
+  geom_col(mapping = aes(x="#4", y=time_for_corner_4_avg)) +
+  geom_errorbar(mapping = aes(x="#1", ymin=time_for_corner_1_avg - time_for_corner_1_sd, ymax=time_for_corner_1_avg + time_for_corner_1_sd), width = 0.2) +
+  geom_errorbar(mapping = aes(x="#2", ymin=time_for_corner_2_avg - time_for_corner_2_sd, ymax=time_for_corner_2_avg + time_for_corner_2_sd), width = 0.2) +
+  geom_errorbar(mapping = aes(x="#3", ymin=time_for_corner_3_avg - time_for_corner_3_sd, ymax=time_for_corner_3_avg + time_for_corner_3_sd), width = 0.2) +
+  geom_errorbar(mapping = aes(x="#4", ymin=time_for_corner_4_avg - time_for_corner_4_sd, ymax=time_for_corner_4_avg + time_for_corner_4_sd), width = 0.2) +
+  scale_x_discrete(name = "Truss Corner") +
+  scale_y_continuous(limits = c(0, 300), name = "Time (in sec.)")
+
+```
+
+
+```{r}
+ggplot(data=joined) +
+  geom_histogram(mapping = aes(x=time_for_corner_1)) +
+  scale_x_continuous(limits = c(0, 300), name = "Time (in sec.)") +
+  ylab("Number of trainees") +
+  ggtitle("Truss Corner #1")
+
+ggplot(data=joined) +
+  geom_histogram(mapping = aes(x=time_for_corner_2)) +
+  scale_x_continuous(limits = c(0, 300), name = "Time (in sec.)") +
+  ylab("Number of trainees") +
+  ggtitle("Truss Corner #2")
+
+ggplot(data=joined) +
+  geom_histogram(mapping = aes(x=time_for_corner_3)) +
+  scale_x_continuous(limits = c(0, 300), name = "Time (in sec.)") +
+  ylab("Number of trainees") +
+  ggtitle("Truss Corner #3")
+
+ggplot(data=joined) +
+  geom_histogram(mapping = aes(x=time_for_corner_4)) +
+  scale_x_continuous(limits = c(0, 300), name = "Time (in sec.)") +
+  ylab("Number of trainees") +
+  ggtitle("Truss Corner #4")
+ 
+```
+
+### Errors
+
+Score per corner
+```{r}
+ggplot(data=joined_s) +
+  geom_col(mapping = aes(x="#1", y=score_corner_1_avg)) +
+  geom_col(mapping = aes(x="#2", y=score_corner_2_avg)) +
+  geom_col(mapping = aes(x="#3", y=score_corner_3_avg)) +
+  geom_col(mapping = aes(x="#4", y=score_corner_4_avg)) +
+  scale_x_discrete(name = "Truss Corner") +
+  scale_y_continuous(limits = c(0, 1), name = "Score") +
+  ggtitle("Average score")
+
+
+```
+
+Score per activity
+```{r}
+ggplot(data=joined_s) +
+  geom_col(mapping = aes(x="#01: Take egg", y=score_activity_01_avg)) +
+  geom_col(mapping = aes(x="#02: Choose egg of correct size", y=score_activity_02_avg)) +
+  geom_col(mapping = aes(x="#03: Check egg for outside damage", y=score_activity_03_avg)) +
+  geom_col(mapping = aes(x="#04: Check egg for inside damage", y=score_activity_04_avg)) +
+  geom_col(mapping = aes(x="#05: Place egg in right direction", y=score_activity_05_avg)) +
+  geom_col(mapping = aes(x="#06: Take correct pivot", y=score_activity_06_avg)) +
+  geom_col(mapping = aes(x="#07: Check pivot for damage", y=score_activity_07_avg)) +
+  geom_col(mapping = aes(x="#08: Disposed damaged pivot, if needed", y=score_activity_08_avg)) +
+  geom_col(mapping = aes(x="#09: Place pivot in right direction", y=score_activity_09_avg)) +
+  geom_col(mapping = aes(x="#10: Check if pivot fits", y=score_activity_10_avg)) +
+  geom_col(mapping = aes(x="#11: Wobble or hammer pivot, if needed", y=score_activity_11_avg)) +
+  geom_col(mapping = aes(x="#12: Choose correct splint pen", y=score_activity_12_avg)) +
+  geom_col(mapping = aes(x="#13: Check if split pen closes properly", y=score_activity_13_avg)) +
+  geom_col(mapping = aes(x="#14: Put splint pen into pivot", y=score_activity_14_avg)) +
+  geom_text(mapping = aes(x="#01: Take egg", y=score_activity_01_avg, label=round(score_activity_01_avg,2)), vjust=1.6, color="white") +
+  geom_text(mapping = aes(x="#02: Choose egg of correct size", y=score_activity_02_avg, label=round(score_activity_02_avg,2)), vjust=1.6, color="white") +
+  geom_text(mapping = aes(x="#03: Check egg for outside damage", y=score_activity_03_avg, label=round(score_activity_03_avg,2)), vjust=1.6, color="white") +
+  geom_text(mapping = aes(x="#04: Check egg for inside damage", y=score_activity_04_avg, label=round(score_activity_04_avg,2)), vjust=1.6, color="white") +
+  geom_text(mapping = aes(x="#05: Place egg in right direction", y=score_activity_05_avg, label=round(score_activity_05_avg,2)), vjust=1.6, color="white") +
+  geom_text(mapping = aes(x="#06: Take correct pivot", y=score_activity_06_avg, label=round(score_activity_06_avg,2)), vjust=1.6, color="white") +
+  geom_text(mapping = aes(x="#07: Check pivot for damage", y=score_activity_07_avg, label=round(score_activity_07_avg,2)), vjust=1.6, color="white") +
+  geom_text(mapping = aes(x="#08: Disposed damaged pivot, if needed", y=score_activity_08_avg, label=round(score_activity_08_avg,2)), vjust=1.6, color="white") +
+  geom_text(mapping = aes(x="#09: Place pivot in right direction", y=score_activity_09_avg, label=round(score_activity_09_avg,2)), vjust=1.6, color="white") +
+  geom_text(mapping = aes(x="#10: Check if pivot fits", y=score_activity_10_avg, label=round(score_activity_10_avg,2)), vjust=1.6, color="white") +
+  geom_text(mapping = aes(x="#11: Wobble or hammer pivot, if needed", y=score_activity_11_avg, label=round(score_activity_11_avg,2)), vjust=1.6, color="white") +
+  geom_text(mapping = aes(x="#12: Choose correct splint pen", y=score_activity_12_avg, label=round(score_activity_12_avg,2)), vjust=1.6, color="white") +
+  geom_text(mapping = aes(x="#13: Check if split pen closes properly", y=score_activity_13_avg, label=round(score_activity_13_avg,2)), vjust=1.6, color="white") +
+  geom_text(mapping = aes(x="#14: Put splint pen into pivot", y=score_activity_14_avg, label=round(score_activity_14_avg,2)), vjust=1.6, color="white") +
+  scale_x_discrete(name = "Activity") +
+  scale_y_continuous(limits = c(0, 1), name = "Score") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  ggtitle("Average score per activity (measured on Truss Corner #2)")
+
+```
+
+
+## Visualization: Trainee Dashboard
+
+```{r}
+one_session <- filter(joined, session == "AULWB")
+
+```
+
+### Time
+
+```{r}
+ggplot(data=one_session) +
+  geom_col(mapping = aes(x="#1", y=time_for_corner_1)) +
+  geom_col(mapping = aes(x="#2", y=time_for_corner_2)) +
+  geom_col(mapping = aes(x="#3", y=time_for_corner_3)) +
+  geom_col(mapping = aes(x="#4", y=time_for_corner_4)) +
+  geom_errorbar(data=joined_s, color="red", mapping = aes(x="#1", ymin=time_for_corner_1_avg, ymax=time_for_corner_1_avg)) +
+  geom_errorbar(data=joined_s, color="red", mapping = aes(x="#2", ymin=time_for_corner_2_avg, ymax=time_for_corner_2_avg)) +
+  geom_errorbar(data=joined_s, color="red", mapping = aes(x="#3", ymin=time_for_corner_3_avg, ymax=time_for_corner_3_avg)) +
+  geom_errorbar(data=joined_s, color="red", mapping = aes(x="#4", ymin=time_for_corner_4_avg, ymax=time_for_corner_4_avg)) +
+  scale_x_discrete(name = "Truss Corner") +
+  scale_y_continuous(limits = c(0, 300), name = "Time (in sec.)")
+  
+```
+
+### Errors
+
+Score per corner
+```{r}
+ggplot(data=one_session) +
+  geom_col(mapping = aes(x="#1", y=score_corner_1)) +
+  geom_col(mapping = aes(x="#2", y=score_corner_2)) +
+  geom_col(mapping = aes(x="#3", y=score_corner_3)) +
+  geom_col(mapping = aes(x="#4", y=score_corner_4)) +
+  geom_errorbar(data=joined_s, color="red", mapping = aes(x="#1", ymin=score_corner_1_avg, ymax=score_corner_1_avg)) +
+  geom_errorbar(data=joined_s, color="red", mapping = aes(x="#2", ymin=score_corner_2_avg, ymax=score_corner_2_avg)) +
+  geom_errorbar(data=joined_s, color="red", mapping = aes(x="#3", ymin=score_corner_3_avg, ymax=score_corner_3_avg)) +
+  geom_errorbar(data=joined_s, color="red", mapping = aes(x="#4", ymin=score_corner_4_avg, ymax=score_corner_4_avg)) +
+  scale_x_discrete(name = "Truss Corner") +
+  scale_y_continuous(limits = c(0, 1), name = "Score") +
+  ggtitle("Average score")
+
+```
+
+
+Score per activity
+```{r}
+ggplot(data=one_session) +
+  geom_col(mapping = aes(x="#01: Take egg", y=score_activity_01)) +
+  geom_col(mapping = aes(x="#02: Choose egg of correct size", y=score_activity_02)) +
+  geom_col(mapping = aes(x="#03: Check egg for outside damage", y=score_activity_03)) +
+  geom_col(mapping = aes(x="#04: Check egg for inside damage", y=score_activity_04)) +
+  geom_col(mapping = aes(x="#05: Place egg in right direction", y=score_activity_05)) +
+  geom_col(mapping = aes(x="#06: Take correct pivot", y=score_activity_06)) +
+  geom_col(mapping = aes(x="#07: Check pivot for damage", y=score_activity_07)) +
+  geom_col(mapping = aes(x="#08: Disposed damaged pivot, if needed", y=score_activity_08)) +
+  geom_col(mapping = aes(x="#09: Place pivot in right direction", y=score_activity_09)) +
+  geom_col(mapping = aes(x="#10: Check if pivot fits", y=score_activity_10)) +
+  geom_col(mapping = aes(x="#11: Wobble or hammer pivot, if needed", y=score_activity_11)) +
+  geom_col(mapping = aes(x="#12: Choose correct splint pen", y=score_activity_12)) +
+  geom_col(mapping = aes(x="#13: Check if split pen closes properly", y=score_activity_13)) +
+  geom_col(mapping = aes(x="#14: Put splint pen into pivot", y=score_activity_14)) +
+  geom_text(mapping = aes(x="#01: Take egg", y=score_activity_01, label=round(score_activity_01,2)), vjust=1.6, color="white") +
+  geom_text(mapping = aes(x="#02: Choose egg of correct size", y=score_activity_02, label=round(score_activity_02,2)), vjust=1.6, color="white") +
+  geom_text(mapping = aes(x="#03: Check egg for outside damage", y=score_activity_03, label=round(score_activity_03,2)), vjust=1.6, color="white") +
+  geom_text(mapping = aes(x="#04: Check egg for inside damage", y=score_activity_04, label=round(score_activity_04,2)), vjust=1.6, color="white") +
+  geom_text(mapping = aes(x="#05: Place egg in right direction", y=score_activity_05, label=round(score_activity_05,2)), vjust=1.6, color="white") +
+  geom_text(mapping = aes(x="#06: Take correct pivot", y=score_activity_06, label=round(score_activity_06,2)), vjust=1.6, color="white") +
+  geom_text(mapping = aes(x="#07: Check pivot for damage", y=score_activity_07, label=round(score_activity_07,2)), vjust=1.6, color="white") +
+  geom_text(mapping = aes(x="#08: Disposed damaged pivot, if needed", y=score_activity_08, label=round(score_activity_08,2)), vjust=1.6, color="white") +
+  geom_text(mapping = aes(x="#09: Place pivot in right direction", y=score_activity_09, label=round(score_activity_09,2)), vjust=1.6, color="white") +
+  geom_text(mapping = aes(x="#10: Check if pivot fits", y=score_activity_10, label=round(score_activity_10,2)), vjust=1.6, color="white") +
+  geom_text(mapping = aes(x="#11: Wobble or hammer pivot, if needed", y=score_activity_11, label=round(score_activity_11,2)), vjust=1.6, color="white") +
+  geom_text(mapping = aes(x="#12: Choose correct splint pen", y=score_activity_12, label=round(score_activity_12,2)), vjust=1.6, color="white") +
+  geom_text(mapping = aes(x="#13: Check if split pen closes properly", y=score_activity_13, label=round(score_activity_13,2)), vjust=1.6, color="white") +
+  geom_text(mapping = aes(x="#14: Put splint pen into pivot", y=score_activity_14, label=round(score_activity_14,2)), vjust=1.6, color="white") +
+  
+  geom_errorbar(data=joined_s, color="red", mapping = aes(x="#01: Take egg", ymin=score_activity_01_avg, ymax=score_activity_01_avg)) +
+  geom_errorbar(data=joined_s, color="red", mapping = aes(x="#02: Choose egg of correct size", ymin=score_activity_02_avg, ymax=score_activity_02_avg)) +
+  geom_errorbar(data=joined_s, color="red", mapping = aes(x="#03: Check egg for outside damage", ymin=score_activity_03_avg, ymax=score_activity_03_avg)) +
+  geom_errorbar(data=joined_s, color="red", mapping = aes(x="#04: Check egg for inside damage", ymin=score_activity_04_avg, ymax=score_activity_04_avg)) +
+    geom_errorbar(data=joined_s, color="red", mapping = aes(x="#05: Place egg in right direction", ymin=score_activity_05_avg, ymax=score_activity_05_avg)) +
+  geom_errorbar(data=joined_s, color="red", mapping = aes(x="#06: Take correct pivot", ymin=score_activity_06_avg, ymax=score_activity_06_avg)) +
+  geom_errorbar(data=joined_s, color="red", mapping = aes(x="#07: Check pivot for damage", ymin=score_activity_07_avg, ymax=score_activity_07_avg)) +
+  geom_errorbar(data=joined_s, color="red", mapping = aes(x="#08: Disposed damaged pivot, if needed", ymin=score_activity_08_avg, ymax=score_activity_08_avg)) +
+    geom_errorbar(data=joined_s, color="red", mapping = aes(x="#09: Place pivot in right direction", ymin=score_activity_09_avg, ymax=score_activity_09_avg)) +
+  geom_errorbar(data=joined_s, color="red", mapping = aes(x="#10: Check if pivot fits", ymin=score_activity_10_avg, ymax=score_activity_10_avg)) +
+  geom_errorbar(data=joined_s, color="red", mapping = aes(x="#11: Wobble or hammer pivot, if needed", ymin=score_activity_11_avg, ymax=score_activity_11_avg)) +
+  geom_errorbar(data=joined_s, color="red", mapping = aes(x="#12: Choose correct splint pen", ymin=score_activity_12_avg, ymax=score_activity_12_avg)) +
+    geom_errorbar(data=joined_s, color="red", mapping = aes(x="#13: Check if split pen closes properly", ymin=score_activity_13_avg, ymax=score_activity_13_avg)) +
+  geom_errorbar(data=joined_s, color="red", mapping = aes(x="#14: Put splint pen into pivot", ymin=score_activity_14_avg, ymax=score_activity_14_avg)) +
+  
+  scale_x_discrete(name = "Activity") +
+  scale_y_continuous(limits = c(0, 1), name = "Score") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  ggtitle("Average score per activity (measured on Truss Corner #2)")
+
+```

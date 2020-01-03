@@ -1,0 +1,13 @@
+name: laar_trainer
+title: laar_trainer
+username:
+account: olivermueller
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 1626286
+bundleId: 2704202
+url: https://olivermueller.shinyapps.io/laar_trainer/
+when: 1578049557.25512
+asMultiple: FALSE
+asStatic: FALSE
+ignoredFiles: trussApp.json|wrangle.Rmd
